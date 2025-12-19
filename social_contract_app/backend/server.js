@@ -3,6 +3,7 @@ const cors = require("cors");
 const { nanoid } = require("nanoid");
 const http = require("http");
 const { Server } = require("socket.io");
+const path = require("path");
 const db = require("./db");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
@@ -20,6 +21,7 @@ const io = new Server(server, {
 
 app.use(cors());
 app.use(express.json());
+app.use(express.static(path.join(__dirname, "public")));
 
 // Helper to run queries.
 const statements = {
@@ -382,7 +384,7 @@ app.post("/api/contracts/:id/messages", requireAuth, (req, res) => {
     createdAt: new Date().toISOString(),
   };
   statements.insertMessage.run(msg);
-  const sender = getUser(senderId);
+  const sender = getUser(req.user.id);
   const withName = { ...msg, senderName: sender?.name || null };
   io.to(roomName(contract.id)).emit("new_message", withName);
   res.json(withName);
@@ -447,6 +449,12 @@ app.delete("/api/contracts/:id", requireAuth, (req, res) => {
 // Simple health check for debugging connectivity.
 app.get("/api/health", (_req, res) => {
   res.json({ ok: true });
+});
+
+// Serve the built frontend for any non-API route.
+app.get("*", (req, res, next) => {
+  if (req.path.startsWith("/api") || req.path.startsWith("/socket.io")) return next();
+  res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
 /* -------------------- Socket.io -------------------- */
