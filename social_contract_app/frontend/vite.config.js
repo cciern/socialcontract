@@ -6,7 +6,9 @@ export default defineConfig({
   plugins: [
     react(),
     VitePWA({
+      disable: process.env.VITE_DISABLE_PWA === "true",
       registerType: "autoUpdate",
+      minify: false,
       manifest: {
         name: "Social Contract",
         short_name: "Social Contract",
