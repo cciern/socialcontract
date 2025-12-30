@@ -30,8 +30,8 @@ const statements = {
   ),
   insertContract: db.prepare(
     `INSERT INTO contracts
-    (id, ownerId, partnerId, title, topicCategory, description, frequencyPerWeek, durationDays, stakesLevel, status, startDate, createdAt, inviteCode)
-    VALUES (@id, @ownerId, @partnerId, @title, @topicCategory, @description, @frequencyPerWeek, @durationDays, @stakesLevel, @status, @startDate, @createdAt, @inviteCode)`
+    (id, ownerId, partnerId, title, topicCategory, description, frequencyPerWeek, durationDays, stakesLevel, proofBasis, status, startDate, createdAt, inviteCode)
+    VALUES (@id, @ownerId, @partnerId, @title, @topicCategory, @description, @frequencyPerWeek, @durationDays, @stakesLevel, @proofBasis, @status, @startDate, @createdAt, @inviteCode)`
   ),
   updateContractMatch: db.prepare(
     "UPDATE contracts SET partnerId=@partnerId, status=@status WHERE id=@id"
@@ -64,7 +64,90 @@ function getContractsForUser(userId) {
        WHERE c.ownerId = ? OR c.partnerId = ?`
     )
     .all(userId, userId);
-  return rows;
+  return rows.map((row) => withProofIdeas(row));
+}
+
+const PROOF_BASIS = new Set(["honor", "prove"]);
+
+function normalizeProofBasis(value) {
+  if (typeof value !== "string") return "honor";
+  const normalized = value.toLowerCase().trim();
+  return PROOF_BASIS.has(normalized) ? normalized : "honor";
+}
+
+function buildProofIdeas(contract) {
+  const basis = normalizeProofBasis(contract.proofBasis);
+  if (basis !== "prove") return [];
+  const ideas = [];
+  const add = (idea) => {
+    if (idea && !ideas.includes(idea)) ideas.push(idea);
+  };
+  const addMany = (list) => list.forEach(add);
+  const title = (contract.title || "").toLowerCase();
+  const description = (contract.description || "").toLowerCase();
+  const text = `${title} ${description}`.trim();
+
+  addMany([
+    "Share a timestamped photo or screenshot.",
+    "Log it in a tracker app and post the weekly summary.",
+    "Send a short note with the key metric (time, distance, count).",
+  ]);
+
+  const topicIdeas = {
+    fitness: [
+      "Screenshot from a run/fitness tracker (distance, pace, heart rate).",
+      "Photo of gym check-in or workout equipment after the session.",
+      "Route map or workout log from your tracker app.",
+    ],
+    sleep: [
+      "Screenshot of sleep tracker showing bedtime and duration.",
+      "Phone bedtime/Downtime settings screenshot.",
+      "Alarm screenshot with your target wake time.",
+    ],
+    study: [
+      "Photo of notes or textbook with a timestamp.",
+      "Timer app screenshot showing focused study time.",
+      "Checklist with topics covered and time spent.",
+    ],
+    food: [
+      "Photo of the meal or meal prep with a timestamp.",
+      "Nutrition tracker screenshot (calories/macros).",
+      "Grocery receipt photo tied to the plan.",
+    ],
+    money: [
+      "Screenshot of savings transfer confirmation.",
+      "Budget tracker screenshot for the week.",
+      "Photo of a tracked expense log or spreadsheet.",
+    ],
+    other: [
+      "Photo or screenshot of the finished work/output.",
+      "Short recap note with a timestamp and what you completed.",
+      "Share a link or file that proves the work was done.",
+    ],
+  };
+
+  addMany(topicIdeas[contract.topicCategory] || topicIdeas.other);
+
+  if (text.includes("run") || text.includes("jog")) {
+    add("Route map screenshot from your run.");
+  }
+  if (text.includes("gym") || text.includes("workout") || text.includes("lift")) {
+    add("Workout log screenshot from your gym app.");
+  }
+  if (text.includes("read") || text.includes("book")) {
+    add("Photo of the page or reading timer screenshot.");
+  }
+  if (contract.frequencyPerWeek >= 5) {
+    add("Weekly streak summary from your tracker app.");
+  }
+
+  return ideas.slice(0, 6);
+}
+
+function withProofIdeas(contract) {
+  if (!contract) return contract;
+  const proofBasis = normalizeProofBasis(contract.proofBasis);
+  return { ...contract, proofBasis, proofIdeas: buildProofIdeas({ ...contract, proofBasis }) };
 }
 
 function tryMatchRandom(newContract) {
@@ -139,80 +222,7 @@ function requireAuth(req, res, next) {
   }
 }
 
-// Seed a few demo users/contracts to make matching and browsing feel alive.
-function seedDemoData() {
-  const demos = [
-    { id: "demo_alex", name: "Alex", email: null, passwordHash: null },
-    { id: "demo_jamie", name: "Jamie", email: null, passwordHash: null },
-    { id: "demo_riley", name: "Riley", email: null, passwordHash: null },
-    { id: "demo_taylor", name: "Taylor", email: null, passwordHash: null },
-  ];
-  const existingUsers = db.prepare("SELECT id FROM users").all().map((u) => u.id);
-  const now = new Date().toISOString();
-
-  demos.forEach((u) => {
-    if (!existingUsers.includes(u.id)) {
-      statements.insertUser.run({ ...u, createdAt: now });
-    }
-  });
-
-  // Seed open contracts if none exist for these demo users.
-  const existingContracts = db.prepare("SELECT id FROM contracts").all();
-  if (existingContracts.length < 2) {
-    const demoContracts = [
-      {
-        id: "demo_contract_run",
-        ownerId: "demo_alex",
-        partnerId: null,
-        title: "Morning runs 3x/week",
-        topicCategory: "fitness",
-        description: "5km runs before 8am, Tues/Thu/Sat.",
-        frequencyPerWeek: 3,
-        durationDays: 30,
-        stakesLevel: "social",
-        status: "open",
-        startDate: now.slice(0, 10),
-        createdAt: now,
-        inviteCode: null,
-      },
-      {
-        id: "demo_contract_sleep",
-        ownerId: "demo_jamie",
-        partnerId: null,
-        title: "In bed by 23:00",
-        topicCategory: "sleep",
-        description: "No phone after 22:30, lights out by 23:00.",
-        frequencyPerWeek: 6,
-        durationDays: 21,
-        stakesLevel: "reward",
-        status: "open",
-        startDate: now.slice(0, 10),
-        createdAt: now,
-        inviteCode: null,
-      },
-      {
-        id: "demo_contract_study",
-        ownerId: "demo_riley",
-        partnerId: null,
-        title: "Study 45m daily",
-        topicCategory: "study",
-        description: "Deep work on weekdays before noon.",
-        frequencyPerWeek: 5,
-        durationDays: 28,
-        stakesLevel: "none",
-        status: "open",
-        startDate: now.slice(0, 10),
-        createdAt: now,
-        inviteCode: null,
-      },
-    ];
-    demoContracts.forEach((c) => {
-      const exists = db.prepare("SELECT 1 FROM contracts WHERE id = ?").get(c.id);
-      if (!exists) statements.insertContract.run(c);
-    });
-  }
-}
-seedDemoData();
+// Demo data removed so only real users can post contracts.
 
 /* -------------------- Auth -------------------- */
 
@@ -270,6 +280,7 @@ app.post("/api/contracts", requireAuth, (req, res) => {
     frequencyPerWeek,
     durationDays,
     stakesLevel,
+    proofBasis,
     matchType,
   } = req.body;
   if (!title || !topicCategory || !frequencyPerWeek || !durationDays || !stakesLevel) {
@@ -289,6 +300,7 @@ app.post("/api/contracts", requireAuth, (req, res) => {
     frequencyPerWeek: Number(frequencyPerWeek),
     durationDays: Number(durationDays),
     stakesLevel,
+    proofBasis: normalizeProofBasis(proofBasis),
     status: "open",
     startDate: now.slice(0, 10),
     createdAt: now,
@@ -303,7 +315,7 @@ app.post("/api/contracts", requireAuth, (req, res) => {
   }
 
   const response = {
-    contract: { ...contract, status: matchedWith ? "matched" : contract.status },
+    contract: withProofIdeas({ ...contract, status: matchedWith ? "matched" : contract.status }),
     inviteCode: contract.inviteCode,
     matchedWith: matchedWith
       ? { user: matchedWith.candidateOwner, contractId: matchedWith.candidate.id }
@@ -315,7 +327,7 @@ app.post("/api/contracts", requireAuth, (req, res) => {
 app.get("/api/contracts/:id", requireAuth, (req, res) => {
   const row = db.prepare("SELECT * FROM contracts WHERE id = ?").get(req.params.id);
   if (!row) return res.status(404).json({ error: "Not found" });
-  res.json(row);
+  res.json(withProofIdeas(row));
 });
 
 // Public explore: list open contracts (no partner yet).
@@ -330,7 +342,7 @@ app.get("/api/contracts", (req, res) => {
        LIMIT 50`
     )
     .all();
-  res.json(rows);
+  res.json(rows.map((row) => withProofIdeas(row)));
 });
 
 app.post("/api/contracts/:id/checkins", requireAuth, (req, res) => {
@@ -393,7 +405,7 @@ app.post("/api/contracts/:id/messages", requireAuth, (req, res) => {
 app.get("/api/invites/:code", (req, res) => {
   const contract = statements.findContractByInvite.get(req.params.code);
   if (!contract) return res.status(404).json({ error: "Invite not found" });
-  res.json(contract);
+  res.json(withProofIdeas(contract));
 });
 
 app.post("/api/invites/:code/accept", requireAuth, (req, res) => {
@@ -407,7 +419,7 @@ app.post("/api/invites/:code/accept", requireAuth, (req, res) => {
     status: "matched",
   });
   const updated = db.prepare("SELECT * FROM contracts WHERE id = ?").get(contract.id);
-  res.json(updated);
+  res.json(withProofIdeas(updated));
 });
 
 // Join an open contract directly (explore).
@@ -430,7 +442,7 @@ app.post("/api/contracts/:id/join", requireAuth, (req, res) => {
   insertWelcomeMessage(contract.id, userId, "Thanks for joining this contract. Let's keep each other accountable.");
 
   const updated = db.prepare("SELECT * FROM contracts WHERE id = ?").get(contract.id);
-  res.json(updated);
+  res.json(withProofIdeas(updated));
 });
 
 // Cancel/delete a contract (owner or partner).

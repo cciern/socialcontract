@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS contracts (
   frequencyPerWeek INTEGER NOT NULL,
   durationDays INTEGER NOT NULL,
   stakesLevel TEXT NOT NULL,
+  proofBasis TEXT NOT NULL DEFAULT 'honor',
   status TEXT NOT NULL,
   startDate TEXT,
   createdAt TEXT NOT NULL,
@@ -62,6 +63,18 @@ try {
   if (!hasPass) {
     db.exec("ALTER TABLE users ADD COLUMN passwordHash TEXT");
   }
+} catch (err) {
+  // ignore if fails; startup will show errors otherwise
+}
+
+// Backfill proofBasis for existing contracts (no-op if already present).
+try {
+  const cols = db.prepare("PRAGMA table_info(contracts)").all();
+  const hasProofBasis = cols.some((c) => c.name === "proofBasis");
+  if (!hasProofBasis) {
+    db.exec("ALTER TABLE contracts ADD COLUMN proofBasis TEXT DEFAULT 'honor'");
+  }
+  db.exec("UPDATE contracts SET proofBasis = 'honor' WHERE proofBasis IS NULL OR proofBasis = ''");
 } catch (err) {
   // ignore if fails; startup will show errors otherwise
 }
